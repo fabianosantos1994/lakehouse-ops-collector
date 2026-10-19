@@ -194,3 +194,203 @@ Tomadas em 2026-10-19:
 | formato do pacote | modelos Pydantic | valida na criação, serializa em JSON e gera o JSON Schema do contrato; o `lakehouse-ai-ops` também usa Pydantic no `Diagnosis` |
 | credenciais na fase 1 | admin local do Airflow e usuário `platform` do banco | leitura manual, no terminal do dono do ambiente; usuários somente leitura antes do poller (MP-26) |
 | CLI | `collect` e `inspect` | o `inspect` custa pouco, porque reaproveita os adapters, e separa "a fonte não tem" de "o coletor cortou" |
+
+## Plano de execução
+
+O coletor é construído em 10 etapas. Cada etapa acrescenta uma parte do
+pacote e termina com um teste manual nos 3 incidentes de referência, rodado
+no terminal. Uma etapa só começa quando o teste da anterior passa. Cada etapa
+também ganha testes automáticos (`pytest`) com adapters falsos e respostas
+gravadas, mas o critério de pronto é o teste manual.
+
+### Preparar o terminal (antes de cada sessão)
+
+```bash
+cd ~/projects/lakehouse-ops-collector
+DAG=commercial_daily_sales_by_region
+RUN_001='backfill__2026-10-15T00:00:00+00:00'; TASK_001=validate_daily_sales_by_region
+RUN_002='backfill__2026-10-16T00:00:00+00:00'; TASK_002=validate_daily_sales_by_region
+RUN_003='backfill__2026-10-17T00:00:00+00:00'; TASK_003=build_daily_sales_by_region
+
+collect() { .venv/bin/python -m lakehouse_ops_collector.collection collect --dag-id "$DAG" --run-id "$1" --task-id "$2"; }
+pkg()     { echo "incidents/$DAG/$1/$2/package.json"; }
+show()    { python3 -c 'import json, sys; print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2]), indent=2, ensure_ascii=False))' "$(pkg "$1" "$2")" "$3"; }
+```
+
+- `collect "$RUN_001" "$TASK_001"` monta o pacote do `ri-001`;
+- `show "$RUN_001" "$TASK_001" attempts` mostra uma seção do pacote.
+
+As stacks precisam estar no ar e as runs dos 3 casos, no histórico do
+Airflow (estão desde 2026-10-18).
+
+### Etapa 1. Esqueleto e chave do incidente
+
+Construir: `pyproject.toml`, `src/lakehouse_ops_collector/`, `.env.example`,
+o modelo Pydantic `IncidentKey` e um `collect` que só valida a chave e grava o
+pacote com `package_version`, `collected_at` e `incident`.
+
+Testar:
+
+```bash
+collect "$RUN_001" "$TASK_001" && show "$RUN_001" "$TASK_001" incident
+collect "" "$TASK_001"   # deve falhar com erro de validação claro, sem gravar arquivo
+```
+
+Pronto quando: os 3 casos geram `package.json` no caminho de `pkg`, e a chave
+vazia é rejeitada pelo Pydantic.
+
+### Etapa 2. Airflow: run e tentativas
+
+Construir: adapter `airflow_api.py` com token em `POST /auth/token`; seções
+`run` (estado, `logical_date`, demais tasks) e `attempts` (tentativa, estado,
+horários); `sources.airflow`.
+
+Testar:
+
+```bash
+for c in 001 002 003; do r=RUN_$c; t=TASK_$c; collect "${!r}" "${!t}"; show "${!r}" "${!t}" attempts; done
+show "$RUN_003" "$TASK_003" run
+AIRFLOW_API_URL=http://127.0.0.1:1 collect "$RUN_001" "$TASK_001"; show "$RUN_001" "$TASK_001" sources
+```
+
+Esperado:
+
+| Caso | `attempts` | `run` |
+| --- | --- | --- |
+| `ri-001` | tentativas 1 e 2, `failed` | sem tasks `upstream_failed` |
+| `ri-002` | tentativas 1 e 2, `failed` | sem tasks `upstream_failed` |
+| `ri-003` | tentativas 1 e 2, `failed` | `validate_daily_sales_by_region` em `upstream_failed` |
+
+Com a URL errada, o pacote é gravado mesmo assim, com o erro em
+`sources.airflow`.
+
+### Etapa 3. Airflow: eventos `lh_*` e exceção
+
+Construir: leitura do log de cada tentativa pela API (`Accept:
+application/json`); `attempts[].lh_events` só com os campos `lh_*` e
+`attempts[].exception` (`Cause`, `Where`, `Next`).
+
+Testar: `show` de `attempts` nos 3 casos.
+
+| Caso | `lh_error_kind` | `lh_evidence` da tentativa 2 |
+| --- | --- | --- |
+| `ri-001` | `data_quality` | `dq_execution:425fbd6e-…` e `pipeline_file:quality/daily_sales_by_region.yaml` |
+| `ri-002` | `data_quality` | `dq_execution:6e612a71-…` e `pipeline_file:quality/daily_sales_by_region.yaml` |
+| `ri-003` | `engine` | `spark_application:app-20261018222628-0020` e `pipeline_file:jobs/build_daily_sales_by_region.py` |
+
+Pronto quando: cada tentativa tem `operator.started`, `operator.failed` e
+`operator.finished`, e nenhum campo fora de `lh_*` entrou nos eventos.
+
+### Etapa 4. Airflow: saída do driver Spark
+
+Construir: recorte do bloco `Spark driver output` a partir de `Traceback`, em
+`attempts[].engine_output`, com limite de linhas (MP-11).
+
+Testar: `show "$RUN_003" "$TASK_003" attempts`.
+
+Esperado: no `ri-003`, o `engine_output` tem `build_daily_sales_by_region.py",
+line 40, in aggregate` e a lista completa de sugestões, terminando em
+`customer_id` (o que o `lh_reason` corta, MP-04). Nos `ri-001` e `ri-002`,
+`engine_output` não existe.
+
+### Etapa 5. Data Quality: checks reprovados
+
+Construir: adapter `platform_metadata.py`; `quality.failed_checks` a partir
+dos `dq_execution` do `lh_evidence`, com `expected_value`, `observed_value` e
+`diagnostic` (MP-10); `sources.platform_metadata`.
+
+Testar: `show` de `quality` nos 3 casos.
+
+| Caso | Esperado em `failed_checks` |
+| --- | --- |
+| `ri-001` | `expected_schema` nas 2 tentativas; o `expected_value` mostra `"2)": null` e `"type": "decimal(18"` em `total_amount` |
+| `ri-002` | `region_standardized` nas 2 tentativas; o `diagnostic` mostra `partial_unexpected_list: ["Sul"]` |
+| `ri-003` | vazio: o caso não tem `dq_execution` |
+
+### Etapa 6. Data Quality: checks relacionados
+
+Construir: `quality.related_checks`, com os checks da mesma run sobre a mesma
+coluna dos checks reprovados (MP-13).
+
+Testar: `show "$RUN_002" "$TASK_002" quality`.
+
+Esperado: no `ri-002`, `related_checks` tem o `region_standardized` de
+`sources.validate_silver_customers`, `passed`, com `Sul` na lista. No
+`ri-001`, vazio: os outros checks de `total_amount` não rodaram, porque o
+`schema` reprovou antes.
+
+### Etapa 7. Domínio: pipeline, task e repositório
+
+Construir: adapter `domain_files.py`; busca do `pipeline.yaml` pelo
+`dag.dag_id` (MP-25); `domain.pipeline_file`, `task_definition`, `owner` e
+`repository` (commit, branch, `dirty`) (MP-14); `sources.domain`.
+
+Testar: `show` de `domain` nos 3 casos.
+
+Esperado: `pipeline_file` `commercial/daily_sales_by_region/pipeline.yaml`,
+`owner` `analytics`, a definição da task do caso e `repository` com
+`branch: main` e `dirty: false`.
+
+### Etapa 8. Domínio: arquivo citado, linha e trecho
+
+Construir: `domain.cited_files` a partir do `pipeline_file` do
+`lh_evidence`, com a linha (`line_source`: `traceback` ou `search`) e um
+trecho com margem (MP-12).
+
+Testar com a falha reaplicada, porque o coletor lê o arquivo como está agora
+(MP-14). Para cada caso, crie a branch e rode o `sed` do caso (etapa 5 da
+fase 0 do `lakehouse-ai-ops`), colete e desfaça:
+
+```bash
+DOMAIN=~/projects/lakehouse-domains/lakehouse-pipelines-domain-b3
+git -C "$DOMAIN" switch -c phase-1/ri-001
+# sed do ri-001 (etapa 5 da fase 0)
+collect "$RUN_001" "$TASK_001"; show "$RUN_001" "$TASK_001" domain
+git -C "$DOMAIN" restore . && git -C "$DOMAIN" switch main && git -C "$DOMAIN" branch -D phase-1/ri-001
+```
+
+| Caso | `line` e `line_source` | O trecho deve mostrar |
+| --- | --- | --- |
+| `ri-001` | 10, `search` (coluna `total_amount` dentro do check `expected_schema`) | `total_amount: {type: decimal(18, 2), …}` sem aspas |
+| `ri-002` | 13, `search` (linha do `id: region_standardized`) | a lista sem `Sul` na linha 16 |
+| `ri-003` | 40, `traceback` | `F.sum("sale_amount")` na linha 42, dentro da margem |
+
+Nos três, `repository.dirty` é `true` e `branch` é `phase-1/<caso>`. Rodar
+também uma vez sem reaplicar a falha: o trecho mostra o arquivo corrigido e
+`dirty: false`, que é exatamente o problema do MP-14.
+
+### Etapa 9. Limites e regras do pacote
+
+Construir: `limits.py` com os limites da seção
+[Pacote v1](#pacote-v1-rascunho) e a remoção do que nunca entra; o `collect`
+passa a imprimir o tamanho do pacote em caracteres e uma estimativa de
+tokens (caracteres / 4).
+
+Testar:
+
+```bash
+for c in 001 002 003; do r=RUN_$c; t=TASK_$c; collect "${!r}" "${!t}"; done
+grep -l -i -E "password|token|secret" incidents/"$DAG"/*/*/package.json   # não deve listar nada
+```
+
+Pronto quando: os 3 pacotes ficam abaixo de cerca de 16 mil caracteres (4 mil
+tokens) e o `grep` não encontra nada.
+
+### Etapa 10. `inspect` e avaliação final
+
+Construir: `inspect airflow|quality|domain`, que chama um adapter e imprime o
+que a fonte devolveu, antes de filtros e limites.
+
+Testar:
+
+```bash
+.venv/bin/python -m lakehouse_ops_collector.collection inspect quality --dag-id "$DAG" --run-id "$RUN_001" --task-id "$TASK_001"
+```
+
+Esperado: as linhas completas da `dq_check_result`, inclusive campos que o
+pacote corta.
+
+Avaliação final: para cada caso, compare o `package.json` com o `notes.md` no
+`lakehouse-ai-ops`. Todo passo marcado "Um coletor leria sozinho? sim" precisa
+estar no pacote. O que faltar ou sobrar vira ponto novo, ou muda o status de
+um ponto, no `docs/improvements.md` do `lakehouse-ai-ops`.
