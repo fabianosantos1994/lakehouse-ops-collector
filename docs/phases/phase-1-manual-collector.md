@@ -199,9 +199,44 @@ Tomadas em 2026-10-19:
 
 O coletor é construído em 10 etapas. Cada etapa acrescenta uma parte do
 pacote e termina com um teste manual nos 3 incidentes de referência, rodado
-no terminal. Uma etapa só começa quando o teste da anterior passa. Cada etapa
-também ganha testes automáticos (`pytest`) com adapters falsos e respostas
-gravadas, mas o critério de pronto é o teste manual.
+no terminal. Cada etapa também ganha testes automáticos (`pytest`) com
+adapters falsos e respostas gravadas, mas o critério de pronto é o teste
+manual.
+
+Ciclo de cada etapa:
+
+1. o Claude implementa a etapa e roda os testes automáticos; o status passa a
+   **implementada, aguardando teste manual**;
+2. você roda os comandos de "Testar" da etapa e compara com o "Esperado";
+3. se passar, o status passa a **concluída**, com a data e o resultado; se
+   não passar, a saída volta para correção.
+
+Uma etapa só começa quando a anterior está concluída. Os comandos de uma etapa
+**não implementada** ainda não funcionam: o `collect` roda, mas as seções novas
+não aparecem no pacote (`show` imprime `null`).
+
+### Andamento
+
+| Etapa | O que acrescenta ao pacote | Status |
+| --- | --- | --- |
+| 1 | esqueleto e chave do incidente | implementada, aguardando teste manual |
+| 2 | Airflow: run e tentativas | não implementada |
+| 3 | Airflow: eventos `lh_*` e exceção | não implementada |
+| 4 | Airflow: saída do driver Spark | não implementada |
+| 5 | Data Quality: checks reprovados | não implementada |
+| 6 | Data Quality: checks relacionados | não implementada |
+| 7 | domínio: pipeline, task e repositório | não implementada |
+| 8 | domínio: arquivo citado, linha e trecho | não implementada |
+| 9 | limites e regras do pacote | não implementada |
+| 10 | `inspect` e avaliação final | não implementada |
+
+### Instalar (uma vez)
+
+```bash
+cd ~/projects/lakehouse-ops-collector
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+```
 
 ### Preparar o terminal (antes de cada sessão)
 
@@ -225,6 +260,12 @@ Airflow (estão desde 2026-10-18).
 
 ### Etapa 1. Esqueleto e chave do incidente
 
+Status: implementada em 2026-10-19, aguardando teste manual. Na
+implementação, os comandos abaixo foram rodados com sucesso: os pacotes dos 3
+casos foram gravados no caminho de `pkg`, e a chave vazia terminou com
+`--run-id: String should have at least 1 character` e código 2, sem gravar
+arquivo.
+
 Construir: `pyproject.toml`, `src/lakehouse_ops_collector/`, `.env.example`,
 o modelo Pydantic `IncidentKey` e um `collect` que só valida a chave e grava o
 pacote com `package_version`, `collected_at` e `incident`.
@@ -240,6 +281,8 @@ Pronto quando: os 3 casos geram `package.json` no caminho de `pkg`, e a chave
 vazia é rejeitada pelo Pydantic.
 
 ### Etapa 2. Airflow: run e tentativas
+
+Status: não implementada.
 
 Construir: adapter `airflow_api.py` com token em `POST /auth/token`; seções
 `run` (estado, `logical_date`, demais tasks) e `attempts` (tentativa, estado,
@@ -266,6 +309,8 @@ Com a URL errada, o pacote é gravado mesmo assim, com o erro em
 
 ### Etapa 3. Airflow: eventos `lh_*` e exceção
 
+Status: não implementada.
+
 Construir: leitura do log de cada tentativa pela API (`Accept:
 application/json`); `attempts[].lh_events` só com os campos `lh_*` e
 `attempts[].exception` (`Cause`, `Where`, `Next`).
@@ -283,6 +328,8 @@ Pronto quando: cada tentativa tem `operator.started`, `operator.failed` e
 
 ### Etapa 4. Airflow: saída do driver Spark
 
+Status: não implementada.
+
 Construir: recorte do bloco `Spark driver output` a partir de `Traceback`, em
 `attempts[].engine_output`, com limite de linhas (MP-11).
 
@@ -294,6 +341,8 @@ line 40, in aggregate` e a lista completa de sugestões, terminando em
 `engine_output` não existe.
 
 ### Etapa 5. Data Quality: checks reprovados
+
+Status: não implementada.
 
 Construir: adapter `platform_metadata.py`; `quality.failed_checks` a partir
 dos `dq_execution` do `lh_evidence`, com `expected_value`, `observed_value` e
@@ -309,6 +358,8 @@ Testar: `show` de `quality` nos 3 casos.
 
 ### Etapa 6. Data Quality: checks relacionados
 
+Status: não implementada.
+
 Construir: `quality.related_checks`, com os checks da mesma run sobre a mesma
 coluna dos checks reprovados (MP-13).
 
@@ -321,6 +372,8 @@ Esperado: no `ri-002`, `related_checks` tem o `region_standardized` de
 
 ### Etapa 7. Domínio: pipeline, task e repositório
 
+Status: não implementada.
+
 Construir: adapter `domain_files.py`; busca do `pipeline.yaml` pelo
 `dag.dag_id` (MP-25); `domain.pipeline_file`, `task_definition`, `owner` e
 `repository` (commit, branch, `dirty`) (MP-14); `sources.domain`.
@@ -332,6 +385,8 @@ Esperado: `pipeline_file` `commercial/daily_sales_by_region/pipeline.yaml`,
 `branch: main` e `dirty: false`.
 
 ### Etapa 8. Domínio: arquivo citado, linha e trecho
+
+Status: não implementada.
 
 Construir: `domain.cited_files` a partir do `pipeline_file` do
 `lh_evidence`, com a linha (`line_source`: `traceback` ou `search`) e um
@@ -361,6 +416,8 @@ também uma vez sem reaplicar a falha: o trecho mostra o arquivo corrigido e
 
 ### Etapa 9. Limites e regras do pacote
 
+Status: não implementada.
+
 Construir: `limits.py` com os limites da seção
 [Pacote v1](#pacote-v1-rascunho) e a remoção do que nunca entra; o `collect`
 passa a imprimir o tamanho do pacote em caracteres e uma estimativa de
@@ -377,6 +434,8 @@ Pronto quando: os 3 pacotes ficam abaixo de cerca de 16 mil caracteres (4 mil
 tokens) e o `grep` não encontra nada.
 
 ### Etapa 10. `inspect` e avaliação final
+
+Status: não implementada.
 
 Construir: `inspect airflow|quality|domain`, que chama um adapter e imprime o
 que a fonte devolveu, antes de filtros e limites.

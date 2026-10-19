@@ -2,13 +2,15 @@
 
 Coletor de informações de operação da plataforma lakehouse: monta o pacote de
 cada incidente de DAG e, nas fases seguintes, detecta incidentes e coleta
-histórico. O repositório está na fase de descoberta; a primeira versão está em
-`docs/phases/phase-1-manual-collector.md`.
+histórico. O desenvolvimento segue o plano de execução de
+`docs/phases/phase-1-manual-collector.md`, uma etapa por vez.
 
 ## Mapa do repositório
 
 | Caminho | Conteúdo |
 | --- | --- |
+| `src/lakehouse_ops_collector/package.py` | formato do pacote (contrato com o `lakehouse-ai-ops`) |
+| `src/lakehouse_ops_collector/collection/` | coletor do incidente |
 | `docs/phases/` | roteiro de cada fase |
 | `docs/decisions/` | ADRs do repositório e índice |
 | `tests/` | testes do repositório |
@@ -55,9 +57,14 @@ histórico. O repositório está na fase de descoberta; a primeira versão está
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pytest
+.venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -q
 ```
+
+- Toda mudança no coletor tem teste em `tests/`, com adapters falsos; os
+  testes não acessam o ambiente.
+- Ao concluir uma etapa do plano da fase 1, rode também o teste manual dela
+  nos 3 casos e registre o resultado no documento da fase.
 
 Informe o resultado de cada validação. Se algo não pôde ser executado, diga
 isso explicitamente.
