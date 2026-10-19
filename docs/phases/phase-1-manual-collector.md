@@ -61,7 +61,7 @@ Um pacote Python, com um subpacote por responsabilidade. Nesta fase, só
 ```text
 lakehouse-ops-collector/
   src/lakehouse_ops_collector/
-    package.py           # IncidentKey e IncidentPackage: o formato publicado (só biblioteca padrão)
+    package.py           # IncidentKey e IncidentPackage: o formato publicado (modelos Pydantic)
     collection/          # fase 1: coletor do incidente
       __main__.py        # CLI: collect e inspect
       collect.py         # caso de uso collect_incident(key) -> IncidentPackage
@@ -87,15 +87,19 @@ sinal para o diagnóstico.
 
 Configuração por variáveis de ambiente, em um `.env` não versionado (com
 `.env.example` versionado): URL e usuário da API do Airflow, conexão do
-`platform_metadata` e caminho dos domínios. Dependências: Python 3.12, cliente
-HTTP da biblioteca padrão e `psycopg` para o PostgreSQL, com versão fixada.
+`platform_metadata` e caminho dos domínios. Na fase 1, as credenciais são o
+admin local do Airflow e o usuário `platform` do banco; os dois podem
+escrever, e a troca por usuários somente leitura é o ponto MP-26.
+Dependências: Python 3.12, Pydantic, `psycopg` para o PostgreSQL e o cliente
+HTTP da biblioteca padrão, com versões fixadas.
 
 ## Contrato com o `lakehouse-ai-ops`
 
 O pacote do incidente é a interface entre os dois repositórios:
 
 - este repositório é o dono do formato: `package_version` no próprio pacote e,
-  quando o formato estabilizar, um JSON Schema publicado aqui;
+  quando o formato estabilizar, um JSON Schema gerado dos modelos Pydantic
+  (`model_json_schema()`) e publicado aqui;
 - o `lakehouse-ai-ops` só lê os arquivos JSON (depois, a base de incidentes)
   e nunca importa código daqui;
 - mudar ou remover um campo exige subir `package_version`; acrescentar campo
@@ -115,7 +119,10 @@ O pacote do incidente é a interface entre os dois repositórios:
 ```
 
 O pacote fica em `incidents/<dag_id>/<run_id>/<task_id>/package.json`, fora do
-Git.
+Git. O `collect` vem primeiro; o `inspect` entra depois que o `collect`
+funcionar, reaproveitando os mesmos adapters. Ele mostra o que cada fonte
+devolve antes dos filtros e limites, e responde se um dado faltou na fonte ou
+foi descartado pelo coletor.
 
 ## Pacote v1 (rascunho)
 
@@ -178,10 +185,12 @@ Depois, comparar o `package.json` com o `notes.md` do caso no
 O que faltar ou sobrar vira ponto novo, ou muda o status de um ponto, no
 `docs/improvements.md` do `lakehouse-ai-ops`.
 
-## Em aberto
+## Decisões
 
-1. Se `package.py` usa só dataclasses ou Pydantic.
-2. Usuário da API do Airflow: o admin local no começo, ou já um usuário
-   somente leitura.
-3. Se o `inspect` por fonte vale o esforço ou se o `collect` com o pacote
-   formatado basta para aprender.
+Tomadas em 2026-10-19:
+
+| Assunto | Decisão | Motivo |
+| --- | --- | --- |
+| formato do pacote | modelos Pydantic | valida na criação, serializa em JSON e gera o JSON Schema do contrato; o `lakehouse-ai-ops` também usa Pydantic no `Diagnosis` |
+| credenciais na fase 1 | admin local do Airflow e usuário `platform` do banco | leitura manual, no terminal do dono do ambiente; usuários somente leitura antes do poller (MP-26) |
+| CLI | `collect` e `inspect` | o `inspect` custa pouco, porque reaproveita os adapters, e separa "a fonte não tem" de "o coletor cortou" |
