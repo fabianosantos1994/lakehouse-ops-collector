@@ -8,6 +8,8 @@ que só lê o que este repositório produz.
 
 Status: fase 1 (API de detecção) concluída
 ([docs/phases/phase-1-incident-detection-api.md](docs/phases/phase-1-incident-detection-api.md)).
+Próxima: fase 2, poller e registro de incidentes, planejada
+([docs/phases/phase-2-poller-and-registry.md](docs/phases/phase-2-poller-and-registry.md)).
 O coletor do incidente está parado na branch `standby/incident-collector`.
 
 ## Posição no workspace
