@@ -1,7 +1,7 @@
 # Registros de decisão arquitetural (ADRs)
 
 Decisões do `lakehouse-ops-collector`. Ainda não há ADRs: as decisões da fase
-de descoberta estão no [documento da fase 1](../phases/phase-1-manual-collector.md)
+atual estão no [documento da fase 1](../phases/phase-1-incident-detection-api.md#decisões)
 e viram ADR quando forem implementadas. ADRs de outros repositórios são
 citados com o nome do repositório (ex.: "ADR 0012 do
 `lakehouse-platform-core-mvp`").
