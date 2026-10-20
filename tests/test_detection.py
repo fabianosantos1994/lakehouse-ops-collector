@@ -292,14 +292,14 @@ def test_record_model_keeps_only_what_detection_uses():
 
 
 def test_missing_credentials_explain_how_to_create_the_env(tmp_path, monkeypatch):
-    from lakehouse_ops_collector.detection.__main__ import load_settings
+    from lakehouse_ops_collector.detection.settings import DetectionSettings, load_settings
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AIRFLOW_USERNAME", raising=False)
     monkeypatch.delenv("AIRFLOW_PASSWORD", raising=False)
 
     with pytest.raises(SystemExit) as error:
-        load_settings()
+        load_settings(DetectionSettings)
 
     message = str(error.value)
     assert "AIRFLOW_PASSWORD, AIRFLOW_USERNAME" in message

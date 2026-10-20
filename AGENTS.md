@@ -2,7 +2,9 @@
 
 Lê, em modo somente leitura, as informações de operação da plataforma lakehouse.
 A fase 1 é a API de detecção, que encontra no Airflow as tasks com falha
-(`docs/phases/phase-1-incident-detection-api.md`). O coletor do incidente
+(`docs/phases/phase-1-incident-detection-api.md`). A fase 2, em andamento,
+cria o poller e o registro de incidentes
+(`docs/phases/phase-2-poller-and-registry.md`). O coletor do incidente
 está parado na branch `standby/incident-collector` e não deve ser trazido
 para a `main` sem pedido.
 
@@ -11,7 +13,8 @@ para a `main` sem pedido.
 | Caminho | Conteúdo |
 | --- | --- |
 | `src/lakehouse_ops_collector/incident.py` | chave do incidente (contrato com o coletor e o `lakehouse-ai-ops`) |
-| `src/lakehouse_ops_collector/detection/` | API de detecção |
+| `src/lakehouse_ops_collector/detection/` | API de detecção e registro de incidentes |
+| `src/lakehouse_ops_collector/detection/schema.sql` | schema do registro (`detection.incident`) |
 | `docs/phases/` | documento de cada fase |
 | `docs/decisions/` | ADRs do repositório e índice |
 | `tests/` | testes do repositório |
@@ -28,8 +31,15 @@ para a `main` sem pedido.
 
 ## Restrições
 
-- Somente leitura: nada aqui altera Airflow, bancos, arquivos dos domínios ou
-  o estado das DAGs.
+- Somente leitura, com uma exceção: o registro de incidentes grava só no
+  banco `ops` do `postgres-ops`, e só por `detection/adapters/postgres.py`
+  (ADR 0001). Nada aqui altera Airflow, os outros bancos, arquivos dos domínios
+  ou o estado das DAGs.
+- O schema do registro só cria o que falta (`IF NOT EXISTS`); nada de `DROP`,
+  `TRUNCATE` ou alteração de tabela existente sem migração explícita e pedido.
+- Durante o desenvolvimento da fase 2, o acesso ao `ops` usa o usuário dono do
+  banco. Ao fim do desenvolvimento, ele é trocado por um usuário restrito ao
+  schema `detection` (ADR 0001).
 - Sem AI: este repositório não chama modelos. Ele extrai; quem interpreta é o
   `lakehouse-ai-ops`.
 - Pacotes de incidente nunca contêm linhas de dados, valores de parâmetros,
@@ -64,7 +74,7 @@ python3 -m venv .venv
 .venv/bin/pytest -q
 ```
 
-- Toda mudança tem teste em `tests/`, com a fonte simulada; os testes não
+- Toda mudança tem teste em `tests/`, com a fonte e o banco simulados; os testes não
   acessam o ambiente.
 - Mudança que afete o que a API devolve: rode também o teste manual do
   documento da fase e registre o resultado em "Andamento".

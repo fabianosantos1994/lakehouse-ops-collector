@@ -1,4 +1,4 @@
-"""Interface da fonte de tentativas; os adapters a implementam."""
+"""Interfaces da fonte de tentativas e do registro; os adapters as implementam."""
 
 from __future__ import annotations
 
@@ -11,6 +11,10 @@ from .models import TaskInstanceRecord
 
 class SourceUnavailable(Exception):
     """A fonte não respondeu ou recusou a consulta."""
+
+
+class RegistryUnavailable(Exception):
+    """O banco do registro não respondeu ou recusou a operação."""
 
 
 class TaskInstanceSource(Protocol):
