@@ -15,8 +15,12 @@ CREATE TABLE IF NOT EXISTS detection.incident (
     -- end_date da última tentativa; base do `since` do poller. Vazio enquanto
     -- a tentativa atual não terminou.
     last_end_date timestamptz,
-    first_seen_at timestamptz NOT NULL DEFAULT now(),
-    updated_at    timestamptz NOT NULL DEFAULT now(),
+    -- Quando e por quem o registro foi criado e alterado por último. `_ds` é o
+    -- modo que gravou (hoje só `poller`); outros modos poderão alimentar a tabela.
+    created_at_dt timestamptz NOT NULL DEFAULT now(),
+    created_at_ds text        NOT NULL,
+    updated_at_dt timestamptz NOT NULL DEFAULT now(),
+    updated_at_ds text        NOT NULL,
     -- A chave do incidente: um incidente por task, nunca duplicado.
     PRIMARY KEY (dag_id, run_id, task_id, map_index)
 );

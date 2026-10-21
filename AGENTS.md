@@ -15,6 +15,7 @@ para a `main` sem pedido.
 | `src/lakehouse_ops_collector/incident.py` | chave do incidente (contrato com o coletor e o `lakehouse-ai-ops`) |
 | `src/lakehouse_ops_collector/detection/` | API de detecção e registro de incidentes |
 | `src/lakehouse_ops_collector/detection/schema.sql` | schema do registro (`detection.incident`) |
+| `src/lakehouse_ops_collector/detection/poller.py` | poller: rodada que lê o Airflow e grava no registro |
 | `docs/phases/` | documento de cada fase |
 | `docs/decisions/` | ADRs do repositório e índice |
 | `tests/` | testes do repositório |

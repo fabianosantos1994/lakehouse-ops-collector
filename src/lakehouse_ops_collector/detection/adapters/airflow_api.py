@@ -10,6 +10,7 @@ import httpx
 
 from ..models import TaskInstanceRecord
 from ..ports import SourceUnavailable
+from ..settings import DetectionSettings
 
 _PAGE_SIZE = 100
 
@@ -20,6 +21,11 @@ class AirflowApiSource:
         self._username = username
         self._password = password
         self._token: str | None = None
+
+    @classmethod
+    def from_settings(cls, settings: DetectionSettings) -> AirflowApiSource:
+        client = httpx.Client(base_url=settings.airflow_api_url, timeout=settings.airflow_timeout_seconds)
+        return cls(client, settings.airflow_username, settings.airflow_password.get_secret_value())
 
     def _authenticate(self) -> str:
         response = self._client.post(

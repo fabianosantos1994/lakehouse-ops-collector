@@ -64,6 +64,9 @@ def test_schema_uses_the_incident_key_as_primary_key():
     assert "PRIMARY KEY (dag_id, run_id, task_id, map_index)" in ddl
     assert "CHECK (status IN ('failed', 'running', 'recovered'))" in ddl
     assert "attempts      jsonb" in ddl
+    for column in ("created_at_dt timestamptz", "created_at_ds text", "updated_at_dt timestamptz", "updated_at_ds text"):
+        assert column in ddl
+    assert "first_seen_at" not in ddl
 
 
 def test_init_creates_the_table_on_an_empty_database():
@@ -165,3 +168,93 @@ def test_init_command_exits_with_the_error_when_the_database_is_down(tmp_path, m
         registry.main(["init"])
 
     assert "registro indisponível em 127.0.0.1:5435/ops" in str(error.value)
+
+
+class ScriptedConnection(FakeConnection):
+    """Conexão simulada que devolve, em ordem, as linhas de cada comando."""
+
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = list(rows)
+        self.params: list = []
+
+    def execute(self, query, params=None):
+        self.statements.append(query)
+        self.params.append(params)
+        self._row = self.rows.pop(0)
+        return self
+
+    def fetchone(self):
+        return self._row
+
+
+def incident(run_id, end_date):
+    from datetime import UTC, datetime
+
+    from lakehouse_ops_collector.detection.models import Attempt, DetectedIncident
+    from lakehouse_ops_collector.incident import IncidentKey
+
+    start = datetime(2026, 10, 18, 20, 53, 54, tzinfo=UTC)
+    return DetectedIncident(
+        key=IncidentKey(dag_id="dag", run_id=run_id, task_id="task"),
+        status="failed",
+        attempts=[
+            Attempt(number=1, cycle=1, state="failed", operator="Op", start_date=start, end_date=start),
+            Attempt(number=2, cycle=1, state="failed", operator="Op", start_date=start, end_date=end_date),
+        ],
+    )
+
+
+def test_save_all_counts_new_updated_and_unchanged_in_one_transaction():
+    from datetime import UTC, datetime
+
+    end = datetime(2026, 10, 18, 20, 59, 7, tzinfo=UTC)
+    # inserido, alterado, igual (o WHERE do upsert não devolve linha)
+    connection = ScriptedConnection([(True,), (False,), None])
+
+    counts = PostgresRegistry(settings(), connect=connection).save_all(
+        [incident("r1", end), incident("r2", end), incident("r3", end)], source="poller"
+    )
+
+    assert (counts.new, counts.updated) == (1, 1)
+    assert connection.committed
+    dag_id, run_id, task_id, map_index, status, attempts, last_end_date, created_ds, updated_ds = connection.params[0]
+    assert (dag_id, run_id, task_id, map_index, status) == ("dag", "r1", "task", -1, "failed")
+    assert (created_ds, updated_ds) == ("poller", "poller")
+    assert [a["number"] for a in attempts.obj] == [1, 2]
+    assert last_end_date == end
+
+
+def test_save_all_upserts_by_the_incident_key_only_when_something_changed():
+    upsert = postgres._UPSERT
+
+    assert "ON CONFLICT (dag_id, run_id, task_id, map_index) DO UPDATE" in upsert
+    assert "IS DISTINCT FROM (EXCLUDED.status, EXCLUDED.attempts)" in upsert
+    # A criação nunca muda; a alteração registra quando e por quem.
+    assert "created_at_dt =" not in upsert
+    assert "created_at_ds =" not in upsert
+    assert "updated_at_dt = now()" in upsert
+    assert "updated_at_ds = EXCLUDED.updated_at_ds" in upsert
+
+
+def test_latest_end_date_and_open_count_read_the_registry():
+    from datetime import UTC, datetime
+
+    end = datetime(2026, 10, 18, 23, 53, tzinfo=UTC)
+    registry = PostgresRegistry(settings(), connect=ScriptedConnection([(end,)]))
+    assert registry.latest_end_date() == end
+
+    connection = ScriptedConnection([(4,)])
+    assert PostgresRegistry(settings(), connect=connection).open_count() == 4
+    assert "status <> 'recovered'" in connection.statements[0]
+
+
+def test_missing_table_asks_to_run_init():
+    class NoTable(FakeConnection):
+        def execute(self, query, params=None):
+            raise psycopg.errors.UndefinedTable('relation "detection.incident" does not exist')
+
+    with pytest.raises(RegistryUnavailable) as error:
+        PostgresRegistry(settings(), connect=NoTable()).latest_end_date()
+
+    assert "registry init" in str(error.value)

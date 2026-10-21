@@ -1,6 +1,6 @@
 # Fase 2: poller e registro de incidentes
 
-- Status: em andamento; etapas 1 e 2 concluídas
+- Status: em andamento; etapas 1, 2 e 3 concluídas
 - Data: 2026-10-19
 
 A fase 1 entregou uma API que responde quando alguém pergunta. Esta fase cria
@@ -63,7 +63,13 @@ Tabela `detection.incident` (criada na etapa 2; o DDL está em
 | `status` | `failed`, `running` ou `recovered`; outro valor é recusado pelo banco |
 | `attempts` | as tentativas, no mesmo formato da API (`jsonb`) |
 | `last_end_date` | `end_date` da última tentativa; base do `since`; vazio enquanto a tentativa atual não terminou |
-| `first_seen_at`, `updated_at` | quando o poller viu o incidente pela primeira vez e a última mudança |
+| `created_at_dt`, `created_at_ds` | quando e por qual modo o registro foi criado; não mudam depois |
+| `updated_at_dt`, `updated_at_ds` | quando e por qual modo o registro foi alterado por último |
+
+O sufixo `_ds` indica quem gravou. Hoje só existe o modo `poller`, a consulta
+ao Airflow agendada pelo poller; outros modos poderão alimentar a mesma tabela
+(por exemplo, um registro manual pela API) e terão o próprio valor.
+
 
 ## Decisões
 
@@ -89,7 +95,7 @@ mudar na implementação.
 | --- | --- | --- |
 | 1 | banco `postgres-ops` no ar | concluída em 2026-10-20 |
 | 2 | schema criado pelo comando deste repositório | concluída em 2026-10-20 |
-| 3 | uma rodada do poller registra os incidentes | não implementada |
+| 3 | uma rodada do poller registra os incidentes | concluída em 2026-10-21 |
 | 4 | poller contínuo, sem duplicar e retomando de onde parou | não implementada |
 | 5 | acompanhamento de um incidente até `recovered` | não implementada |
 
@@ -179,7 +185,7 @@ Esperado: a primeira vez imprime `detection.incident criada em
 docker exec lakehouse-ops-postgres-ops-1 psql -U ops -d ops -c '\d detection.incident' -c 'select count(*) from detection.incident'
 ```
 
-Esperado: as 9 colunas da tabela acima, a chave primária
+Esperado: as 11 colunas da tabela acima, a chave primária
 `incident_pkey` e `count` igual a 0. No DBeaver, o schema `detection` aparece
 no banco `ops` depois de atualizar a árvore (F5).
 
@@ -189,10 +195,65 @@ no banco `ops` depois de atualizar a árvore (F5).
 .venv/bin/python -m lakehouse_ops_collector.detection.poller --once
 ```
 
-Faz uma rodada só e encerra.
+Faz uma rodada só e encerra. Lê o Airflow (as credenciais `AIRFLOW_*` do
+`.env`, como a API) e grava no registro (`OPS_DB_*`). A rodada mostra uma
+linha:
 
-Esperado: 4 incidentes registrados, os mesmos da fase 1 (`ri-001`, `ri-002`,
-`ri-003` e a run a mais), todos `failed`. Rodar de novo registra 0 novos.
+```text
+<agora>  since=<início da leitura>  lidos=N  novos=N  atualizados=N  abertos=N
+```
+
+- `since`: o maior `last_end_date` do registro menos 5 minutos; `-` com o
+  registro vazio, quando a rodada lê todo o histórico;
+- `lidos`: incidentes `failed` que o Airflow devolveu desde o `since`;
+- `novos` e `atualizados`: chaves gravadas pela primeira vez e chaves que já
+  existiam mas mudaram de status ou de tentativas; uma chave igual não conta;
+- `abertos`: incidentes do registro que não estão `recovered`.
+
+Implementado:
+
+- `detection/poller.py`: a rodada (`run_once`) e o comando `--once`;
+- port `IncidentRegistry` em `detection/ports.py` e, no adapter
+  `adapters/postgres.py`, `save_all` (grava a rodada numa transação só, com
+  `INSERT ... ON CONFLICT` pela `key`), `latest_end_date` e `open_count`;
+- teto de 10.000 incidentes por rodada; se for atingido, a linha avisa que os
+  mais antigos ficaram de fora;
+- erros do Airflow ou do banco encerram a rodada com `rodada falhou: ...`, sem
+  gravar nada; sem a tabela, a mensagem pede para rodar o `init`;
+- testes em `tests/test_poller.py` (Airflow e registro simulados) e em
+  `tests/test_registry.py`.
+
+Não implementado nesta etapa: o laço de 30 s (sem `--once`, o comando avisa
+que é da etapa 4) e o acompanhamento dos abertos até `running` e `recovered`
+(etapa 5). `created_at_dt` e `created_at_ds` são gravados só na inserção;
+`updated_at_dt` e `updated_at_ds` mudam só quando o status ou as tentativas
+mudam. O poller grava `poller` nos dois `_ds`.
+
+**Teste manual**
+
+A tabela foi recriada com as colunas `_dt` e `_ds` e já está populada pela
+rodada que rodei depois da recriação (4 novos). Rode mais uma vez:
+
+```bash
+.venv/bin/python -m lakehouse_ops_collector.detection.poller --once
+```
+
+Esperado: `since=2026-10-18T22:21:30Z  lidos=1  novos=0  atualizados=0  abertos=4`.
+O `since` é o fim do `ri-003` (22:26:30) menos 5 minutos, e só o `ri-003`
+terminou depois disso; ele é relido, mas não muda nada.
+
+Numa tabela vazia, a primeira rodada mostra
+`since=-  lidos=4  novos=4  atualizados=0  abertos=4`.
+
+```bash
+docker exec lakehouse-ops-postgres-ops-1 psql -U ops -d ops -c "select run_id, task_id, status, jsonb_array_length(attempts) as attempts, created_at_dt, created_at_ds, updated_at_dt, updated_at_ds from detection.incident order by last_end_date desc"
+```
+
+Esperado: 4 linhas, os mesmos incidentes da fase 1 (`ri-003`, `ri-002`,
+`ri-001` e a run `scheduled__2026-10-18`), todos `failed`, com 2 tentativas,
+`poller` em `created_at_ds` e `updated_at_ds`, e `updated_at_dt` igual a
+`created_at_dt`, porque a sua rodada não alterou nada. No DBeaver, a coluna
+`attempts` mostra o JSON no mesmo formato da API.
 
 ### Etapa 4: poller contínuo
 
@@ -227,10 +288,41 @@ Esperado, no registro, para essa `key`:
 | 2026-10-20 | etapa 1: acesso ao `postgres-ops` pelo DBeaver aprovado no teste manual; etapa concluída |
 | 2026-10-20 | etapa 2 implementada; testes automáticos passando; DDL conferido no `postgres-ops` dentro de uma transação desfeita (`ROLLBACK`), sem deixar a tabela criada |
 | 2026-10-20 | etapa 2: `init` rodado duas vezes (criada e depois "nada alterado") e tabela vazia conferida no DBeaver no teste manual; etapa concluída |
+| 2026-10-20 | etapa 3 implementada; testes automáticos passando; duas rodadas contra o Airflow e o `postgres-ops` reais numa transação desfeita (`ROLLBACK`): 4 novos e depois 0, registro vazio ao final |
+| 2026-10-20 | sua rodada do poller registrou os 4 incidentes `failed` |
+| 2026-10-21 | colunas `first_seen_at` e `updated_at` trocadas por `created_at_dt`, `created_at_ds`, `updated_at_dt` e `updated_at_ds`, a seu pedido; tabela apagada (`DROP TABLE`, autorizado) e recriada pelo `init`; uma rodada repopulou os 4 incidentes e a seguinte não alterou nada; desenho do `collection.job` registrado como planejado |
+| 2026-10-21 | etapa 3: tabela com o schema novo e os 4 incidentes conferida no teste manual; etapa concluída |
 
 ## Fora desta fase
 
 - Endpoint na API para consultar o registro.
 - Agrupar incidentes da mesma run.
 - Rodar o poller como serviço (container ou systemd).
-- Volta do coletor, que passa a ler as chaves do registro.
+- Volta do coletor, que passa a ler as chaves do registro (desenho abaixo).
+
+## Processamento pelo coletor (planejado)
+
+Desenho para a volta do coletor; **nada disto está implementado**. O `status`
+do registro diz o que aconteceu com a task no Airflow. O processamento diz o
+que já foi feito com o incidente, e fica numa tabela do coletor,
+`collection.job`, no mesmo banco `ops`. Um incidente pode estar `failed` no
+Airflow e `done` na coleta.
+
+| Estado | Significado | Quando |
+| --- | --- | --- |
+| `pending` | ainda não processado | incidente `failed` no registro sem job para a sua `key` e o seu `cycle` |
+| `processing` | o coletor está montando o pacote | o coletor pega o job e grava `started_at` |
+| `done` | pacote gravado | grava `finished_at` e onde ficou o pacote |
+| `error` | a coleta falhou | grava a mensagem; volta a `pending` até um limite de tentativas |
+
+- **Um job por `key` e `cycle`.** Depois de um `clear` e de uma falha nova
+  (ciclo 2), surge um job novo: a falha nova pede um pacote novo.
+- **Sem dois coletores no mesmo job.** O coletor pega o job com
+  `SELECT ... FOR UPDATE SKIP LOCKED`.
+- **Job travado volta.** Um job em `processing` há mais tempo que um limite
+  volta a ficar disponível, para o caso de o coletor cair no meio.
+- **Cada parte grava o que é dela.** O coletor só lê `detection.incident` e
+  grava só em `collection.job`; o poller não conhece a coleta.
+- **A decidir na volta do coletor:** o limite de tentativas e o tempo de
+  `processing`; e o que fazer com um incidente que ficou `recovered` antes da
+  coleta (coletar mesmo assim ou pular).

@@ -36,6 +36,7 @@ lakehouse-ai-ops              diagnóstico com modelo local e avaliação
 | `src/lakehouse_ops_collector/incident.py` | chave do incidente (Pydantic): o que a detecção devolve e o coletor recebe |
 | `src/lakehouse_ops_collector/detection/` | API de detecção: endpoints, casos de uso, port e adapter do Airflow |
 | `src/lakehouse_ops_collector/detection/registry.py`, `schema.sql`, `adapters/postgres.py` | registro de incidentes: comando `init`, schema e adapter PostgreSQL |
+| `src/lakehouse_ops_collector/detection/poller.py` | poller: lê os incidentes do Airflow e grava no registro |
 | `.env.example` | variáveis de ambiente da API e do registro |
 | `docs/phases/` | documento de cada fase |
 | `docs/decisions/` | ADRs do repositório |
@@ -75,10 +76,12 @@ A documentação interativa fica em `http://127.0.0.1:8090/docs`. Endpoints,
 parâmetros e respostas estão no
 [documento da fase 1](docs/phases/phase-1-incident-detection-api.md#endpoints).
 
-Criar o schema do registro (rodar de novo não altera nada):
+Criar o schema do registro (rodar de novo não altera nada) e fazer uma rodada
+do poller, que grava no registro os incidentes do Airflow:
 
 ```bash
 .venv/bin/python -m lakehouse_ops_collector.detection.registry init
+.venv/bin/python -m lakehouse_ops_collector.detection.poller --once
 ```
 
 ## Validação

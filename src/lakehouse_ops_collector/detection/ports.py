@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
-from .models import TaskInstanceRecord
+from .models import DetectedIncident, TaskInstanceRecord
 
 
 class SourceUnavailable(Exception):
@@ -42,4 +42,30 @@ class TaskInstanceSource(Protocol):
 
     def health(self) -> dict:
         """Estado da fonte; levanta SourceUnavailable se ela não responde."""
+        ...
+
+
+class SaveCounts(NamedTuple):
+    """Resultado de uma gravação no registro: incidentes novos e alterados."""
+
+    new: int
+    updated: int
+
+
+class IncidentRegistry(Protocol):
+    def save_all(self, incidents: Sequence[DetectedIncident], source: str) -> SaveCounts:
+        """Grava os incidentes pela `key`, numa transação só, sem duplicar.
+
+        `source` é o modo que grava (`created_at_ds` e `updated_at_ds`). Um
+        incidente que já existe só é alterado se o status ou as tentativas
+        mudaram; igual, ele não conta como novo nem como atualizado.
+        """
+        ...
+
+    def latest_end_date(self) -> datetime | None:
+        """O maior `last_end_date` do registro, ou None se ele está vazio."""
+        ...
+
+    def open_count(self) -> int:
+        """Quantos incidentes não estão `recovered`."""
         ...
