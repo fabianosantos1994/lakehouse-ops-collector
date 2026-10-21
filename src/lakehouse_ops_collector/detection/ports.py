@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import NamedTuple, Protocol
 
+from ..incident import IncidentKey
 from .models import DetectedIncident, TaskInstanceRecord
 
 
@@ -68,4 +69,8 @@ class IncidentRegistry(Protocol):
 
     def open_count(self) -> int:
         """Quantos incidentes não estão `recovered`."""
+        ...
+
+    def list_open(self) -> list[IncidentKey]:
+        """As chaves dos incidentes que não estão `recovered`."""
         ...

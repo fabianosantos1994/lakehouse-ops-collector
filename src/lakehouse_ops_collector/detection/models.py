@@ -13,7 +13,10 @@ from ..incident import IncidentKey
 FAILED = "failed"
 UP_FOR_RETRY = "up_for_retry"
 
-IncidentStatus = Literal["failed", "retrying"]
+# `failed` e `retrying` vêm do estado atual da task. `running` e `recovered`
+# só aparecem na consulta por chave, depois de uma falha: a task voltou a
+# rodar (ou espera uma nova tentativa) ou terminou com sucesso.
+IncidentStatus = Literal["failed", "retrying", "running", "recovered"]
 
 
 class TaskInstanceRecord(BaseModel):

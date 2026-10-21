@@ -1,6 +1,6 @@
 # Fase 2: poller e registro de incidentes
 
-- Status: em andamento; etapas 1, 2 e 3 concluídas
+- Status: concluída em 2026-10-21
 - Data: 2026-10-19
 
 A fase 1 entregou uma API que responde quando alguém pergunta. Esta fase cria
@@ -82,6 +82,8 @@ ao Airflow agendada pelo poller; outros modos poderão alimentar a mesma tabela
 | usuário do banco | durante o desenvolvimento, o `ops`, dono do banco; ao fim, um usuário restrito ao schema `detection` | decisão sua; liberdade para recriar o schema enquanto ele muda, menor privilégio depois |
 | driver | `psycopg[binary]==3.3.6` | driver PostgreSQL atual para Python; o `binary` dispensa a `libpq` no host |
 | execução do poller | processo rodado na mão no terminal, com `--once` para uma rodada só | igual à API; agendar como serviço fica para depois |
+| rodada com falha | no laço, mostra `rodada falhou: ...` e segue; com `--once`, encerra com erro | o Airflow ou o banco fora do ar por um tempo não derruba o poller; a rodada seguinte tenta de novo do mesmo `since` |
+| intervalo | 30 s, configurável em `POLLER_INTERVAL_SECONDS`; contado do fim de uma rodada ao início da seguinte | uma rodada lenta não se sobrepõe à seguinte |
 | incidentes `retrying` | não são registrados | o coletor só age na falha definitiva |
 | testes | registro simulado nos testes automáticos; o adapter PostgreSQL é verificado no teste manual | os testes não acessam o ambiente |
 
@@ -96,8 +98,8 @@ mudar na implementação.
 | 1 | banco `postgres-ops` no ar | concluída em 2026-10-20 |
 | 2 | schema criado pelo comando deste repositório | concluída em 2026-10-20 |
 | 3 | uma rodada do poller registra os incidentes | concluída em 2026-10-21 |
-| 4 | poller contínuo, sem duplicar e retomando de onde parou | não implementada |
-| 5 | acompanhamento de um incidente até `recovered` | não implementada |
+| 4 | poller contínuo, sem duplicar e retomando de onde parou | concluída em 2026-10-21 |
+| 5 | acompanhamento de um incidente até `recovered` | concluída em 2026-10-21 |
 
 ### Etapa 1: subir o banco
 
@@ -261,11 +263,47 @@ Esperado: 4 linhas, os mesmos incidentes da fase 1 (`ri-003`, `ri-002`,
 .venv/bin/python -m lakehouse_ops_collector.detection.poller
 ```
 
-Roda a cada 30 s e mostra uma linha por rodada (novos, atualizados,
-abertos). `Ctrl+C` encerra.
+Roda uma rodada a cada 30 s e mostra uma linha por rodada, no mesmo formato
+do `--once`. `Ctrl+C` encerra. A pausa vem de `POLLER_INTERVAL_SECONDS` no
+`.env` (padrão 30).
 
-Esperado: as rodadas mostram 0 novos. Parar e subir de novo continua de onde
-parou, sem duplicar nada.
+Implementado:
+
+- `run_loop` em `detection/poller.py`: a rodada da etapa 3 repetida, com a
+  pausa entre elas;
+- uma rodada com erro do Airflow ou do banco mostra `rodada falhou: ...` numa
+  linha, não grava nada e não encerra o laço;
+- `Ctrl+C` encerra com `poller encerrado`; uma rodada interrompida no meio é
+  desfeita pela transação, sem gravação pela metade;
+- a retomada não precisa de nada novo: o `since` vem do registro, então
+  subir de novo continua de onde parou;
+- `PollerSettings` em `detection/settings.py`; intervalo zero ou negativo
+  encerra com `configuração incompleta: POLLER_INTERVAL_SECONDS`.
+
+Não implementado nesta etapa: o acompanhamento dos abertos até `running` e
+`recovered` (etapa 5) e rodar o poller como serviço.
+
+**Teste manual**
+
+```bash
+.venv/bin/python -m lakehouse_ops_collector.detection.poller
+```
+
+Esperado: `poller iniciado: uma rodada a cada 30 s; Ctrl+C encerra` e, a cada
+30 s, `since=2026-10-18T22:21:30Z  lidos=1  novos=0  atualizados=0  abertos=4`.
+Depois de duas ou três rodadas, `Ctrl+C` mostra `poller encerrado`. Suba de
+novo: a primeira rodada já sai com 0 novos, sem duplicar. No DBeaver, a
+tabela continua com 4 linhas e `updated_at_dt` igual a `created_at_dt`.
+
+Opcional, a falha sem derrubar nada no ambiente: suba com uma porta errada do
+banco.
+
+```bash
+OPS_DB_PORT=1 POLLER_INTERVAL_SECONDS=5 .venv/bin/python -m lakehouse_ops_collector.detection.poller
+```
+
+Esperado: a cada 5 s, `rodada falhou: registro indisponível em
+127.0.0.1:1/ops: ...`, e o poller continua até o `Ctrl+C`.
 
 ### Etapa 5: incidente recuperado
 
@@ -274,10 +312,83 @@ Com o poller rodando, dê `clear` pela UI do Airflow na task
 mais, que é descartável. O domínio está correto na `main`, então a nova
 tentativa deve passar.
 
-Esperado, no registro, para essa `key`:
-- `running` enquanto a task roda;
-- `recovered` quando ela terminar;
-- uma 3ª tentativa com `cycle: 2`, o que confirma o `cycle` no Airflow real.
+Implementado:
+
+- a cada rodada, depois de buscar as falhas novas, o poller consulta no
+  Airflow, pela chave, cada incidente aberto do registro e grava o estado
+  atual; as duas listas vão na mesma transação, uma entrada por chave;
+- `get_incident` em `detection/service.py` responde também depois da falha.
+  Com uma tentativa anterior `failed` e o estado atual:
+
+  | Estado atual no Airflow | Status |
+  | --- | --- |
+  | `failed` | `failed` |
+  | `up_for_retry` | `retrying` na API; `running` no registro, que não tem `retrying` |
+  | sem estado (logo depois do `clear`), `scheduled`, `queued`, `running`, `deferred`, `up_for_reschedule`, `restarting` | `running` |
+  | `success` | `recovered` |
+  | `skipped`, `upstream_failed`, `removed` e outros | não muda o incidente |
+
+- logo depois do `clear`, antes de o scheduler agendar a task, o Airflow a
+  deixa sem estado e com o número da tentativa anterior; nesse intervalo, as
+  tentativas continuam mostrando a 2 como `failed`, e não uma tentativa vazia;
+- um incidente `recovered` sai do acompanhamento. Se a mesma `key` falhar de
+  novo, a busca de falhas novas a traz de volta a `failed`;
+- a API passa a responder `running` ou `recovered` em
+  `GET /incidents/{dag_id}/{run_id}/{task_id}`; o `404` fica para a task que
+  não existe ou nunca falhou.
+
+Não implementado nesta etapa: `dag_version` nas tentativas e rodar o poller
+como serviço.
+
+**Teste manual**
+
+1. Suba o poller e deixe rodando:
+
+   ```bash
+   .venv/bin/python -m lakehouse_ops_collector.detection.poller
+   ```
+
+   Esperado: `lidos=1  novos=0  atualizados=0  abertos=4` a cada rodada.
+
+2. Despause a DAG `commercial_daily_sales_by_region`. Ela tem
+   `catchup: False`, então cria só a run `scheduled__2026-10-20T00:00:00+00:00`,
+   que roda o pipeline inteiro. Espere essa run terminar.
+
+   Esperado: as rodadas continuam com `novos=0`. Se a run do dia 20 falhar,
+   aparece `novos=1` e `abertos=5`: é um incidente novo, registrado como
+   qualquer outro.
+
+3. Dê `clear` em `validate_daily_sales_by_region` da run
+   `scheduled__2026-10-18T00:00:00+00:00`. É a última task da DAG, então não
+   há tasks depois dela para incluir.
+
+   Esperado, nas rodadas seguintes:
+   - `atualizados=1` com a task de volta a rodar: o registro passa a
+     `running`; pode aparecer mais um `atualizados=1` quando a 3ª tentativa
+     começa;
+   - `atualizados=1` e `abertos=3` quando ela termina com sucesso: o registro
+     passa a `recovered`;
+   - depois disso, `atualizados=0` e `abertos=3`.
+
+4. Confira o registro:
+
+   ```bash
+   docker exec lakehouse-ops-postgres-ops-1 psql -U ops -d ops -c "select status, (select jsonb_agg(a->'cycle') from jsonb_array_elements(attempts) a) as cycles, (select jsonb_agg(a->'state') from jsonb_array_elements(attempts) a) as states, updated_at_dt, updated_at_ds from detection.incident where run_id = 'scheduled__2026-10-18T00:00:00+00:00'"
+   ```
+
+   Esperado: `recovered`, ciclos `[1, 1, 2]`, estados
+   `["failed", "failed", "success"]` e `updated_at_ds` `poller`. A 3ª
+   tentativa com `cycle: 2` confirma o `cycle` no Airflow real.
+
+5. Opcional, a API: com ela no ar, a consulta por chave dessa run devolve
+   `"status": "recovered"` em vez de `404`.
+
+Se a nova tentativa falhar, com `retries: 1` vêm a 3ª e a 4ª tentativas no
+`cycle: 2`, cerca de 5 minutos uma da outra; o registro passa por `running` e
+volta a `failed` com 4 tentativas. O `cycle` fica confirmado do mesmo jeito.
+
+Depois do teste, a DAG continua despausada e roda todo dia às 00:00 UTC, a
+menos que você a pause de novo.
 
 ## Andamento
 
@@ -292,6 +403,10 @@ Esperado, no registro, para essa `key`:
 | 2026-10-20 | sua rodada do poller registrou os 4 incidentes `failed` |
 | 2026-10-21 | colunas `first_seen_at` e `updated_at` trocadas por `created_at_dt`, `created_at_ds`, `updated_at_dt` e `updated_at_ds`, a seu pedido; tabela apagada (`DROP TABLE`, autorizado) e recriada pelo `init`; uma rodada repopulou os 4 incidentes e a seguinte não alterou nada; desenho do `collection.job` registrado como planejado |
 | 2026-10-21 | etapa 3: tabela com o schema novo e os 4 incidentes conferida no teste manual; etapa concluída |
+| 2026-10-21 | etapa 4 implementada; testes automáticos passando; no ambiente real, 3 rodadas de 2 s com 0 novos e nada alterado, e com a porta do banco errada as rodadas falharam sem encerrar o laço |
+| 2026-10-21 | etapa 4: laço, `Ctrl+C`, retomada sem duplicar e falha com porta errada conferidos no teste manual; etapa concluída |
+| 2026-10-21 | etapa 5 implementada; testes automáticos passando; no ambiente real, uma rodada com o acompanhamento dos 4 abertos não alterou nada, e uma task que nunca falhou continua sem incidente (`404`) |
+| 2026-10-21 | etapa 5: DAG despausada, run do dia 20 sem incidente novo; `clear` na run `scheduled__2026-10-18` levou o registro de `failed` a `running` e a `recovered`, com ciclos `[1, 1, 2]` e estados `failed`, `failed`, `success`; o `cycle` ficou confirmado no Airflow real; etapa e fase concluídas |
 
 ## Fora desta fase
 

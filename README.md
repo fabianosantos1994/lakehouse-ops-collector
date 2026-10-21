@@ -10,7 +10,7 @@ que só lê o que este repositório produz.
 
 Status: fase 1 (API de detecção) concluída
 ([docs/phases/phase-1-incident-detection-api.md](docs/phases/phase-1-incident-detection-api.md)).
-Em andamento: fase 2, poller e registro de incidentes
+Fase 2 (poller e registro de incidentes) concluída
 ([docs/phases/phase-2-poller-and-registry.md](docs/phases/phase-2-poller-and-registry.md)).
 O coletor do incidente está parado na branch `standby/incident-collector`.
 
@@ -76,11 +76,13 @@ A documentação interativa fica em `http://127.0.0.1:8090/docs`. Endpoints,
 parâmetros e respostas estão no
 [documento da fase 1](docs/phases/phase-1-incident-detection-api.md#endpoints).
 
-Criar o schema do registro (rodar de novo não altera nada) e fazer uma rodada
-do poller, que grava no registro os incidentes do Airflow:
+Criar o schema do registro (rodar de novo não altera nada) e rodar o poller,
+que grava no registro os incidentes do Airflow a cada 30 s
+(`POLLER_INTERVAL_SECONDS`) até o `Ctrl+C`, ou uma vez só com `--once`:
 
 ```bash
 .venv/bin/python -m lakehouse_ops_collector.detection.registry init
+.venv/bin/python -m lakehouse_ops_collector.detection.poller
 .venv/bin/python -m lakehouse_ops_collector.detection.poller --once
 ```
 

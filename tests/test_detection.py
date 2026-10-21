@@ -257,12 +257,36 @@ def test_api_reads_one_incident_with_an_encoded_run_id():
 
 
 def test_api_returns_404_for_a_task_that_did_not_fail():
-    succeeded = airflow_item("backfill__2026-10-15T00:00:00+00:00", "build_daily_sales_by_region", state="success")
+    # Passou na primeira tentativa: nunca falhou, então não é incidente.
+    succeeded = airflow_item("backfill__2026-10-15T00:00:00+00:00", "build_daily_sales_by_region", state="success", try_number=1)
     client = client_for(FakeAirflow([succeeded]))
 
     response = client.get(f"/incidents/{DAG}/backfill__2026-10-15T00%3A00%3A00%2B00%3A00/build_daily_sales_by_region")
 
     assert response.status_code == 404
+
+
+def test_api_reads_an_incident_that_recovered_after_a_failure():
+    # Falhou na tentativa 1 e passou na 2: antes da fase 2 era 404.
+    recovered = airflow_item("backfill__2026-10-15T00:00:00+00:00", "validate_daily_sales_by_region", state="success")
+    client = client_for(FakeAirflow([recovered]))
+
+    body = client.get(f"/incidents/{DAG}/backfill__2026-10-15T00%3A00%3A00%2B00%3A00/validate_daily_sales_by_region").json()
+
+    assert body["status"] == "recovered"
+    assert [(a["number"], a["state"]) for a in body["attempts"]] == [(1, "failed"), (2, "success")]
+
+
+def test_a_cleared_task_waiting_to_be_scheduled_is_running_and_keeps_the_failed_try():
+    source = HistorySource([
+        attempt_record(1, 1), attempt_record(2, 1),
+        attempt_record(2, 3, state=None),
+    ])
+
+    incident = get_incident(source, IncidentKey(dag_id=DAG, run_id="r", task_id="t"))
+
+    assert incident.status == "running"
+    assert [(a.number, a.cycle, a.state) for a in incident.attempts] == [(1, 1, "failed"), (2, 1, "failed")]
 
 
 def test_api_rejects_a_naive_since():

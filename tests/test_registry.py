@@ -258,3 +258,16 @@ def test_missing_table_asks_to_run_init():
         PostgresRegistry(settings(), connect=NoTable()).latest_end_date()
 
     assert "registry init" in str(error.value)
+
+
+def test_list_open_returns_the_keys_of_the_incidents_not_recovered():
+    class Rows(ScriptedConnection):
+        def fetchall(self):
+            return self._row
+
+    connection = Rows([[("dag", "r1", "task", -1), ("dag", "r2", "task", 0)]])
+
+    keys = PostgresRegistry(settings(), connect=connection).list_open()
+
+    assert [(k.run_id, k.map_index) for k in keys] == [("r1", -1), ("r2", 0)]
+    assert "WHERE status <> 'recovered'" in connection.statements[0]

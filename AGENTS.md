@@ -2,8 +2,8 @@
 
 Lê, em modo somente leitura, as informações de operação da plataforma lakehouse.
 A fase 1 é a API de detecção, que encontra no Airflow as tasks com falha
-(`docs/phases/phase-1-incident-detection-api.md`). A fase 2, em andamento,
-cria o poller e o registro de incidentes
+(`docs/phases/phase-1-incident-detection-api.md`). A fase 2, concluída,
+criou o poller e o registro de incidentes
 (`docs/phases/phase-2-poller-and-registry.md`). O coletor do incidente
 está parado na branch `standby/incident-collector` e não deve ser trazido
 para a `main` sem pedido.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from pydantic import SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,13 @@ class RegistrySettings(BaseSettings):
     ops_db_user: str = "ops"
     ops_db_password: SecretStr
     ops_db_connect_timeout_seconds: int = 5
+
+
+class PollerSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Pausa entre o fim de uma rodada e o início da seguinte.
+    poller_interval_seconds: float = Field(default=30.0, gt=0)
 
 
 SettingsT = TypeVar("SettingsT", bound=BaseSettings)

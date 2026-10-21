@@ -14,6 +14,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from ...incident import IncidentKey
 from ..models import DetectedIncident
 from ..ports import RegistryUnavailable, SaveCounts
 from ..settings import RegistrySettings
@@ -126,3 +127,11 @@ class PostgresRegistry:
             return connection.execute(
                 f"SELECT count(*) FROM {TABLE} WHERE status <> 'recovered'"
             ).fetchone()[0]
+
+    def list_open(self) -> list[IncidentKey]:
+        with self._transaction() as connection:
+            rows = connection.execute(
+                f"SELECT dag_id, run_id, task_id, map_index FROM {TABLE} "
+                "WHERE status <> 'recovered' ORDER BY last_end_date DESC NULLS FIRST"
+            ).fetchall()
+        return [IncidentKey(dag_id=d, run_id=r, task_id=t, map_index=m) for d, r, t, m in rows]

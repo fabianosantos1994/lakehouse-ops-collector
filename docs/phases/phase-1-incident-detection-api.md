@@ -37,7 +37,7 @@ Exemplo do `ri-001`:
 | Campo | Significado |
 | --- | --- |
 | `key` | a chave do incidente: o que o coletor recebe (`dag_id`, `run_id`, `task_id`, `map_index`) |
-| `status` | `failed` (falha definitiva) ou `retrying` (falhou, mas ainda vai tentar de novo) |
+| `status` | `failed` (falha definitiva) ou `retrying` (falhou, mas ainda vai tentar de novo); na consulta por chave, desde a fase 2, também `running` e `recovered` ([fase 2](phase-2-poller-and-registry.md#etapa-5-incidente-recuperado)) |
 | `attempts` | uma entrada por tentativa, em ordem (campos abaixo) |
 
 Campos de cada tentativa:
@@ -81,7 +81,7 @@ task que falhou antes delas (seção 5 da proposta de troubleshooting do
 | --- | --- | --- |
 | `GET /health` | estado da API e do Airflow (scheduler, dag-processor) | sempre `200`; o Airflow fora do ar aparece em `airflow.status: error` |
 | `GET /incidents` | lista os incidentes, do mais recente para o mais antigo | `200`; `502` se o Airflow não responder; `422` se um parâmetro for inválido |
-| `GET /incidents/{dag_id}/{run_id}/{task_id}` | consulta um incidente pela chave | `200`; `404` se a task não existe ou não está com falha; `502` se o Airflow não responder |
+| `GET /incidents/{dag_id}/{run_id}/{task_id}` | consulta um incidente pela chave | `200`; `404` se a task não existe ou nunca falhou; `502` se o Airflow não responder |
 | `GET /docs` | documentação interativa, para chamar a API pelo navegador | `200` |
 
 Parâmetros de `GET /incidents`:
@@ -256,7 +256,7 @@ Encerre a API, suba de novo com `AIRFLOW_API_URL=http://127.0.0.1:1
 - O poller da proposta é esta mesma consulta repetida a cada 30 s, com a
   posição da última leitura guardada (`since`).
 - Ainda não implementado, da proposta de formato: `dag_version` em cada
-  tentativa; status `recovered` (falhou e depois passou) e `running` (reabriu
-  e está rodando), na consulta por chave, no lugar do `404` de hoje.
-- O cálculo do `cycle` só foi testado com dados simulados. Um `clear`
-  controlado na run `scheduled__2026-10-18` confirmaria no Airflow real.
+  tentativa. Os status `recovered` e `running` na consulta por chave vieram
+  na etapa 5 da fase 2.
+- O cálculo do `cycle` foi confirmado no Airflow real na etapa 5 da fase 2,
+  com um `clear` na run `scheduled__2026-10-18`.
