@@ -407,6 +407,13 @@ menos que você a pause de novo.
 | 2026-10-21 | etapa 4: laço, `Ctrl+C`, retomada sem duplicar e falha com porta errada conferidos no teste manual; etapa concluída |
 | 2026-10-21 | etapa 5 implementada; testes automáticos passando; no ambiente real, uma rodada com o acompanhamento dos 4 abertos não alterou nada, e uma task que nunca falhou continua sem incidente (`404`) |
 | 2026-10-21 | etapa 5: DAG despausada, run do dia 20 sem incidente novo; `clear` na run `scheduled__2026-10-18` levou o registro de `failed` a `running` e a `recovered`, com ciclos `[1, 1, 2]` e estados `failed`, `failed`, `success`; o `cycle` ficou confirmado no Airflow real; etapa e fase concluídas |
+| 2026-10-21 | DAG pausada de novo por você depois do teste; restrição do usuário do banco adiada para o fim do desenvolvimento e registrada em "Pendências" |
+
+## Pendências
+
+| Pendência | Quando | Situação |
+| --- | --- | --- |
+| trocar o usuário `ops`, dono do banco, por um usuário restrito ao schema `detection` (ler e gravar só a `detection.incident`), criado de forma reproduzível | no fim do desenvolvimento, não no fim desta fase: a volta do coletor ainda vai criar o schema `collection` | aberta; decisão sua em 2026-10-21; registrada também no ADR 0001 |
 
 ## Fora desta fase
 

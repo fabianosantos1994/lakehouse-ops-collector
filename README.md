@@ -12,7 +12,9 @@ Status: fase 1 (API de detecção) concluída
 ([docs/phases/phase-1-incident-detection-api.md](docs/phases/phase-1-incident-detection-api.md)).
 Fase 2 (poller e registro de incidentes) concluída
 ([docs/phases/phase-2-poller-and-registry.md](docs/phases/phase-2-poller-and-registry.md)).
-O coletor do incidente está parado na branch `standby/incident-collector`.
+Próxima: fase 3, o coletor do incidente, planejada
+([docs/phases/phase-3-incident-collector.md](docs/phases/phase-3-incident-collector.md));
+até lá, o coletor está parado na branch `standby/incident-collector`.
 
 ## Posição no workspace
 
