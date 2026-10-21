@@ -1,5 +1,11 @@
 # lakehouse-ops-collector
 
+> **Suspenso em 2026-10-21.** A integração de AI foi adiada até ser
+> repriorizada. Nada deste repositório roda no ambiente: os containers foram
+> removidos e a stack `ops` saiu da `main` do `lakehouse-infra` (está na
+> branch `standby/ai-integration` de lá). Mapa do que foi feito e como
+> retomar: `docs/suspension.md` do `lakehouse-ai-ops`.
+
 Lê, em modo somente leitura, as informações de operação da plataforma
 lakehouse. Hoje tem a API de detecção, que encontra no Airflow as tasks com
 falha e devolve a chave de cada incidente, e o registro de incidentes, o único
@@ -12,8 +18,10 @@ Status: fase 1 (API de detecção) concluída
 ([docs/phases/phase-1-incident-detection-api.md](docs/phases/phase-1-incident-detection-api.md)).
 Fase 2 (poller e registro de incidentes) concluída
 ([docs/phases/phase-2-poller-and-registry.md](docs/phases/phase-2-poller-and-registry.md)).
-Próxima: fase 3, o coletor do incidente, planejada
-([docs/phases/phase-3-incident-collector.md](docs/phases/phase-3-incident-collector.md));
+Fase 3 (poller e API em container) implementada, sem teste manual, suspensa
+([docs/phases/phase-3-poller-container.md](docs/phases/phase-3-poller-container.md)).
+Depois, fase 4, o coletor do incidente
+([docs/phases/phase-4-incident-collector.md](docs/phases/phase-4-incident-collector.md));
 até lá, o coletor está parado na branch `standby/incident-collector`.
 
 ## Posição no workspace
@@ -87,6 +95,21 @@ que grava no registro os incidentes do Airflow a cada 30 s
 .venv/bin/python -m lakehouse_ops_collector.detection.poller
 .venv/bin/python -m lakehouse_ops_collector.detection.poller --once
 ```
+
+### Em container
+
+O poller e a API rodam como serviços da stack `ops` do `lakehouse-infra`, a
+partir do `Dockerfile` deste repositório. Com a suspensão, a stack só existe na
+branch `standby/ai-integration` de lá. Nela:
+
+```bash
+./scripts/start-all.sh up ops             # constrói a imagem e sobe postgres-ops, poller e detection-api
+docker logs -f lakehouse-ops-poller-1     # uma linha por rodada
+```
+
+A configuração vem do `docker/.env` do `lakehouse-infra`, não do `.env` deste
+repositório. Com o container no ar, não rode o poller à mão em laço; o
+`--once` continua valendo para testes.
 
 ## Validação
 

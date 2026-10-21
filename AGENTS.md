@@ -1,5 +1,11 @@
 # AGENTS.md
 
+> **Suspenso em 2026-10-21.** A integração de AI foi adiada até ser
+> repriorizada. Nada deste repositório roda no ambiente: os containers foram
+> removidos e a stack `ops` saiu da `main` do `lakehouse-infra` (está na
+> branch `standby/ai-integration` de lá). Mapa do que foi feito e como
+> retomar: `docs/suspension.md` do `lakehouse-ai-ops`.
+
 Lê, em modo somente leitura, as informações de operação da plataforma lakehouse.
 A fase 1 é a API de detecção, que encontra no Airflow as tasks com falha
 (`docs/phases/phase-1-incident-detection-api.md`). A fase 2, concluída,
@@ -16,6 +22,7 @@ para a `main` sem pedido.
 | `src/lakehouse_ops_collector/detection/` | API de detecção e registro de incidentes |
 | `src/lakehouse_ops_collector/detection/schema.sql` | schema do registro (`detection.incident`) |
 | `src/lakehouse_ops_collector/detection/poller.py` | poller: rodada que lê o Airflow e grava no registro |
+| `Dockerfile`, `.dockerignore` | imagem do poller e da API, rodada pela stack `ops` do `lakehouse-infra` (branch `standby/ai-integration` de lá) |
 | `docs/phases/` | documento de cada fase |
 | `docs/decisions/` | ADRs do repositório e índice |
 | `tests/` | testes do repositório |
@@ -32,6 +39,8 @@ para a `main` sem pedido.
 
 ## Restrições
 
+- Enquanto o repositório estiver suspenso, não suba containers nem traga a
+  stack `ops` de volta ao `lakehouse-infra` sem pedido.
 - Somente leitura, com uma exceção: o registro de incidentes grava só no
   banco `ops` do `postgres-ops`, e só por `detection/adapters/postgres.py`
   (ADR 0001). Nada aqui altera Airflow, os outros bancos, arquivos dos domínios
@@ -54,7 +63,12 @@ para a `main` sem pedido.
   melhoria no `lakehouse-ai-ops`.
 - Os subpacotes (`detection` hoje; `collection` e `history` depois) importam
   só os modelos compartilhados (`incident.py`), nunca uns aos outros.
-- A API de detecção escuta só em `127.0.0.1` e não tem autenticação própria.
+- A API de detecção não tem autenticação própria e só é publicada no loopback
+  do host: à mão, escuta em `127.0.0.1`; no container da stack `ops`, escuta
+  em `0.0.0.0` dentro da rede Docker, e o `lakehouse-infra` publica a porta só
+  em `127.0.0.1` (ADR 0014 do `lakehouse-infra`).
+- A imagem (`Dockerfile`) nunca leva `.env`, `.venv`, `incidents/` nem testes
+  (`.dockerignore`); a configuração do container vem do Compose.
 - Não versione `.env` nem pacotes coletados (`incidents/`).
 
 ## Convenções

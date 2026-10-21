@@ -1,7 +1,8 @@
-# Fase 3: coletor do incidente
+# Fase 4: coletor do incidente
 
-- Status: planejada, nada implementado
-- Data: 2026-10-21
+- Status: planejada, nada implementado; suspensa em 2026-10-21 com a
+  integração de AI
+- Data: 2026-10-21 (era a fase 3; passou a 4 quando o poller em container virou a fase 3)
 
 A fase 2 deixou no registro (`detection.incident`) cada incidente, uma vez só.
 Esta fase traz de volta o **coletor**, que monta o **pacote do incidente**: o
@@ -56,6 +57,7 @@ Git, como na branch parada.
 | limites do job | até 3 tentativas com `error`; `processing` por mais de 10 minutos volta a `pending` | o coletor que cair no meio não deixa o job preso |
 | credenciais do `platform_metadata` | usuário `platform`, por `.env`, como na branch parada | o usuário somente leitura é o MP-26 |
 | `.env` | as variáveis novas do coletor entram no mesmo `.env` do repositório | um arquivo só para a API, o poller e o coletor |
+| onde o coletor roda | na mesma imagem do poller da [fase 3](phase-3-poller-container.md), como mais um serviço da stack `ops` ou chamado pelo poller | a imagem já tem o pacote inteiro e as variáveis de acesso |
 
 ## Execução
 
@@ -92,12 +94,19 @@ Esperado, em resumo:
 | Data | Evento |
 | --- | --- |
 | 2026-10-21 | documento criado a partir do plano da branch `standby/incident-collector`; nada implementado |
+| 2026-10-21 | renumerada de fase 3 para fase 4; o poller em container entrou antes; gravar o pacote no banco ficou para uma fase posterior |
 
 ## Fora desta fase
 
 - Diagnóstico com modelo (`lakehouse-ai-ops`).
 - Pacote v2 e v3 (sensores, histórico de mudanças).
-- Guardar o pacote no PostgreSQL em vez de arquivos.
-- Rodar o poller e o coletor como serviço.
+- Gravar o pacote no banco para auditoria e validação, numa fase posterior,
+  decisão sua em 2026-10-21. Desenho discutido: tabela `collection.package`,
+  só com inserções (recoletar cria um pacote novo e mantém o anterior), com a
+  chave, o `cycle`, `package_version`, o pacote em `jsonb`, `size_chars` e
+  `created_at_dt`/`created_at_ds`; o `collection.job` aponta para o pacote
+  gerado. O agent continua sem credenciais do ambiente: lê o `package.json`
+  exportado e, depois, um endpoint da API.
+- Rodar o poller como serviço: é a [fase 3](phase-3-poller-container.md).
 - Apagar a branch `standby/incident-collector`, depois que a etapa 11 for
   concluída.

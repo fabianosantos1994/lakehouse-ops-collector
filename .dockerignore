@@ -1,0 +1,12 @@
+# Fora da imagem: credenciais, ambiente local, pacotes coletados, testes e docs.
+.env
+.venv/
+incidents/
+tests/
+docs/
+.git/
+**/__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.vscode/
